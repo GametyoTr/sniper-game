@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Simple Sniper Game</title>
+<style>
+  body, html {
+    margin: 0; padding: 0; overflow: hidden; background: #222;
+    font-family: Arial, sans-serif;
+  }
+  #gameCanvas {
+    display: block;
+    background: #444;
+    margin: 0 auto;
+    touch-action: none;
+  }
+  #ui {
+    position: fixed;
+    bottom: 10px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 20px;
+  }
+  button {
+    font-size: 18px;
+    padding: 12px 20px;
+    border-radius: 8px;
+    border: none;
+    background: #08f;
+    color: white;
+    user-select: none;
+    touch-action: manipulation;
+  }
+  button:active {
+    background: #05c;
+  }
+  #score {
+    position: fixed;
+    top: 10px; left: 10px;
+    color: white;
+    font-size: 22px;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="480" height="320"></canvas>
+<div id="score">Score: 0</div>
+
+<div id="ui">
+  <button id="moveLeft">◀</button>
+  <button id="moveRight">▶</button>
+  <button id="fire">FIRE</button>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  const width = canvas.width;
+  const height = canvas.height;
+
+  let score = 0;
+  const scoreElem = document.getElementById('score');
+
+  // Player sniper
+  const player = {
+    x: width / 2,
+    y: height - 40,
+    width: 40,
+    height: 10,
+    speed: 5,
+  };
+
+  // Bullets
+  const bullets = [];
+
+  // Targets
+  const targets = [];
+
+  // Spawn a target every 2 seconds
+  function spawnTarget() {
+    const target = {
+      x: Math.random() * (width - 30) + 15,
+      y: 50,
+      radius: 15,
+      speed: 1 + Math.random() * 1.5,
+      direction: Math.random() < 0.5 ? 1 : -1,
+      hit: false,
+    };
+    targets.push(target);
+  }
+
+  // Spawn interval
+  let spawnInterval = setInterval(spawnTarget, 2000);
+
+  // Move player
+  function movePlayer(dir) {
+    player.x += dir * player.speed;
+    if (player.x < player.width / 2) player.x = player.width / 2;
+    if (player.x > width - player.width / 2) player.x = width - player.width / 2;
+  }
+
+  // Fire bullet
+  function fireBullet() {
+    bullets.push({
+      x: player.x,
+      y: player.y,
+      radius: 5,
+      speed: 7,
+      active: true,
+    });
+  }
+
+  // Check collision bullet-target
+  function isHit(bullet, target) {
+    const dx = bullet.x - target.x;
+    const dy = bullet.y - target.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    return dist < bullet.radius + target.radius;
+  }
+
+  // Update game state
+  function update() {
+    // Move targets
+    targets.forEach(target => {
+      if (target.hit) return;
+      target.x += target.speed * target.direction;
+      if (target.x < target.radius || target.x > width - target.radius) {
+        target.direction *= -1;
+      }
+    });
+
+    // Move bullets
+    bullets.forEach(bullet => {
+      if (!bullet.active) return;
+      bullet.y -= bullet.speed;
+      if (bullet.y < 0) bullet.active = false;
+
+      // Check collision
+      targets.forEach(target => {
+        if (!target.hit && isHit(bullet, target)) {
+          target.hit = true;
+          bullet.active = false;
+          score += 10;
+          scoreElem.textContent = 'Score: ' + score;
+        }
+      });
+    });
+
+    // Remove inactive bullets
+    for(let i = bullets.length - 1; i >= 0; i--) {
+      if (!bullets[i].active) bullets.splice(i,1);
+    }
+
+    // Remove hit targets after 1 second
+    for(let i = targets.length - 1; i >= 0; i--) {
+      if (targets[i].hit) {
+        if (!targets[i].removeTime) targets[i].removeTime = Date.now();
+        else if (Date.now() - targets[i].removeTime > 1000) {
+          targets.splice(i,1);
+        }
+      }
+    }
+  }
+
+  // Draw everything
+  function draw() {
+    ctx.clearRect(0, 0, width, height);
+
+    // Draw player sniper
+    ctx.fillStyle = 'white';
+    ctx.fillRect(player.x - player.width / 2, player.y, player.width, player.height);
+    // Draw sniper barrel
+    ctx.fillRect(player.x - 5, player.y - 10, 10, 10);
+
+    // Draw bullets
+    ctx.fillStyle = 'yellow';
+    bullets.forEach(bullet => {
+      if (bullet.active) {
+        ctx.beginPath();
+        ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+
+    // Draw targets
+    targets.forEach(target => {
+      ctx.fillStyle = target.hit ? 'red' : 'lime';
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, target.radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Target center circle
+      ctx.strokeStyle = '#222';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, target.radius / 2, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+  }
+
+  // Main game loop
+  function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  loop();
+
+  // Button controls
+  document.getElementById('moveLeft').addEventListener('touchstart', e => { e.preventDefault(); movePlayer(-1); });
+  document.getElementById('moveRight').addEventListener('touchstart', e => { e.preventDefault(); movePlayer(1); });
+  document.getElementById('fire').addEventListener('touchstart', e => { e.preventDefault(); fireBullet(); });
+
+  // Also support holding buttons
+  let leftPressed = false;
+  let rightPressed = false;
+
+  document.getElementById('moveLeft').addEventListener('touchstart', e => { e.preventDefault(); leftPressed = true; });
+  document.getElementById('moveLeft').addEventListener('touchend', e => { e.preventDefault(); leftPressed = false; });
+  document.getElementById('moveRight').addEventListener('touchstart', e => { e.preventDefault(); rightPressed = true; });
+  document.getElementById('moveRight').addEventListener('touchend', e => { e.preventDefault(); rightPressed = false; });
+
+  function moveWhilePressed() {
+    if(leftPressed) movePlayer(-1);
+    if(rightPressed) movePlayer(1);
+    requestAnimationFrame(moveWhilePressed);
+  }
+  moveWhilePressed();
+
+})();
+</script>
+
+</body>
+</html>
