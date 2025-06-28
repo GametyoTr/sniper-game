@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Epic 2D Hikayeli Oyun - FULL</title>
+<style>
+  /* Temel stiller */
+  body {
+    margin: 0;
+    background: #121212;
+    color: #eee;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    overflow: hidden;
+    user-select: none;
+  }
+  #gameCanvas {
+    background: #222;
+    display: block;
+    margin: 0 auto;
+    border: 3px solid #555;
+    image-rendering: pixelated;
+  }
+  #dialogueBox {
+    position: fixed;
+    bottom: 110px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.85);
+    padding: 15px 25px;
+    border-radius: 12px;
+    max-width: 85%;
+    font-size: 18px;
+    line-height: 1.4;
+    display: none;
+    z-index: 1000;
+  }
+  #hud {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    font-size: 18px;
+    color: #ccc;
+    z-index: 1000;
+  }
+  #controls {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 12px;
+    z-index: 1000;
+  }
+  .btn {
+    background: #555;
+    border: none;
+    border-radius: 12px;
+    padding: 18px 22px;
+    font-size: 20px;
+    color: #eee;
+    cursor: pointer;
+    opacity: 0.85;
+    user-select: none;
+    transition: opacity 0.2s ease;
+  }
+  .btn:active {
+    opacity: 1;
+  }
+  #questList {
+    position: fixed;
+    top: 60px;
+    left: 10px;
+    max-width: 300px;
+    background: rgba(20, 20, 20, 0.8);
+    padding: 10px 15px;
+    border-radius: 12px;
+    font-size: 16px;
+    max-height: 320px;
+    overflow-y: auto;
+    color: #ddd;
+    z-index: 1000;
+  }
+  /* Scrollbar */
+  #questList::-webkit-scrollbar {
+    width: 6px;
+  }
+  #questList::-webkit-scrollbar-thumb {
+    background-color: #777;
+    border-radius: 3px;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="800" height="400"></canvas>
+
+<div id="dialogueBox"></div>
+<div id="hud"></div>
+<div id="questList"></div>
+
+<div id="controls">
+  <button class="btn" id="leftBtn">←</button>
+  <button class="btn" id="talkBtn">🗨️</button>
+  <button class="btn" id="rightBtn">→</button>
+  <button class="btn" id="interactBtn">⚙️</button>
+  <button class="btn" id="inventoryBtn">🎒</button>
+</div>
+
+<script>
+// --- Oyun değişkenleri ---
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const dialogueBox = document.getElementById('dialogueBox');
+const hud = document.getElementById('hud');
+const questListDiv = document.getElementById('questList');
+
+const leftBtn = document.getElementById('leftBtn');
+const rightBtn = document.getElementById('rightBtn');
+const talkBtn = document.getElementById('talkBtn');
+const interactBtn = document.getElementById('interactBtn');
+const inventoryBtn = document.getElementById('inventoryBtn');
+
+let moveLeft = false;
+let moveRight = false;
+
+const tileSize = 50;
+
+// Oyuncu objesi
+let player = {
+  x: 100,
+  y: 330,
+  width: 40,
+  height: 50,
+  speed: 4,
+  hp: 100,
+  maxHp: 100,
+  energy: 100,
+  maxEnergy: 100,
+  inventory: [],
+  facing: 'right',
+  attacking: false,
+  attackCooldown: 0,
+};
+
+// Basit NPC örneği
+class NPC {
+  constructor(name, x, y, dialogues, imgUrl) {
+    this.name = name;
+    this.x = x;
+    this.y = y;
+    this.width = 40;
+    this.height = 50;
+    this.dialogues = dialogues; // Array of dialogue strings
+    this.img = new Image();
+    this.img.src = imgUrl;
+    this.dialogueIndex = 0;
+  }
+  draw() {
+    ctx.drawImage(this.img, this.x, this.y, this.width, this.height);
+  }
+  talk() {
+    if (this.dialogueIndex < this.dialogues.length) {
+      enqueueDialogue(`${this.name}: ${this.dialogues[this.dialogueIndex]}`);
+      this.dialogueIndex++;
+    } else {
+      enqueueDialogue(`${this.name}: ...`);
+    }
+  }
+}
+
+// Basit düşman örneği
+class Enemy {
+  constructor(name, x, y, hp, speed, imgUrl) {
+    this.name = name;
+    this.x = x;
+    this.y = y;
+    this.width = 40;
+    this.height = 50;
+    this.hp = hp;
+    this.speed = speed;
+    this.img = new Image();
+    this.img.src = imgUrl;
+    this.dead = false;
+  }
+  draw() {
+    if (!this.dead) ctx.drawImage(this.img, this.x, this.y, this.width, this.height);
+  }
+  update() {
+    if (this.dead) return;
+    // Basit yapay zeka: oyuncuya doğru yürü
+    if (player.x < this.x) this.x -= this.speed;
+    else if (player.x > this.x) this.x += this.speed;
+
+    // Saldırı kontrolü (basit)
+    if (Math.abs(player.x - this.x) < 40) {
+      attackPlayer(5); // oyuncuya hasar
+    }
+  }
+}
+
+// Görseller (temel ve ücretsiz kaynaklardan)
+const images = {
+  player: new Image(),
+  oldMan: new Image(),
+  scientist: new Image(),
+  robot: new Image(),
+  enemy1: new Image(),
+  bg1: new Image(),
+  bg2: new Image(),
+  itemPotion: new Image(),
+};
+
+images.player.src = 'https://i.ibb.co/wcnWZJV/player.png'; // Basit oyuncu sprite
+images.oldMan.src = 'https://i.ibb.co/y5XNdRM/oldman.png';
+images.scientist.src = 'https://i.ibb.co/8DQTWxQ/scientist.png';
+images.robot.src = 'https://i.ibb.co/4WN0w5F/robot.png';
+images.enemy1.src = 'https://i.ibb.co/7RYmt6N/enemy.png'; // örnek düşman
+images.bg1.src = 'https://i.ibb.co/NxMvkJ2/forest-bg.png';
+images.bg2.src = 'https://i.ibb.co/WzRt3pW/lab-bg.png';
+images.itemPotion.src = 'https://i.ibb.co/9c6Nx0V/potion.png';
+
+// Mekanlar
+const areas = {
+  1: { name: 'İstasyon', bg: images.bg2, npcs: [], enemies: [], items: [] },
+  2: { name: 'Orman', bg: images.bg1, npcs: [], enemies: [], items: [] },
+  3: { name: 'Laboratuvar', bg: images.bg2, npcs: [], enemies: [], items: [] },
+  4: { name: 'Şehir', bg: null, npcs: [], enemies: [], items: [] },
+  5: { name: 'Gizli Üs', bg: null, npcs: [], enemies: [], items: [] },
+};
+
+let currentArea = 1;
+
+// NPC ve düşman yaratma (örnekler)
+areas[1].npcs.push(new NPC('Yaşlı Adam', 400, 330, [
+  "Hoş geldin genç dost.",
+  "Burası tehlikeli, dikkat et.",
+  "Güney çıkışını bulmalısın."
+], images.oldMan.src));
+
+areas[2].npcs.push(new NPC('Gizemli Kadın', 350, 330, [
+  "Ormanda yalnız değilsin.",
+  "Birlikte hareket edersek hayatta kalırız.",
+  "Laboratuvara gitmelisin."
+], images.scientist.src));
+
+areas[1].enemies.push(new Enemy('Robot Güvenlik', 600, 330, 40, 1.5, images.robot.src));
+
+areas[2].enemies.push(new Enemy('Orman Canavarı', 500, 330, 60, 2, images.enemy1.src));
+
+// Eşyalar (toplanabilir)
+class Item {
+  constructor(name, x, y, imgSrc, type, effect) {
+    this.name = name;
+    this.x = x;
+    this.y = y;
+    this.width = 30;
+    this.height = 30;
+    this.img = new Image();
+    this.img.src = imgSrc;
+    this.type = type; // 'potion', 'weapon', 'key' vb.
+    this.effect = effect; // Örn: {hp: +20}
+    this.collected = false;
+  }
+  draw() {
+    if (!this.collected) ctx.drawImage(this.img, this.x, this.y, this.width, this.height);
+  }
+}
+
+areas[2].items.push(new Item('Can İksiri', 450, 340, images.itemPotion.src, 'potion', {hp: 25}));
+
+// Görev sistemi
+class Quest {
+  constructor(id, title, description) {
+    this.id = id;
+    this.title = title;
+    this.description = description;
+    this.completed = false;
+  }
+}
+
+let quests = [];
+quests.push(new Quest(1, 'İstasyondan Kaç', 'Yaşlı adamın sözünü dinle ve istasyondan güvenli çıkışı bul.'));
+quests.push(new Quest(2, 'Ormana Ulaş', 'Ormana ulaş ve gizemli kadınla konuş.'));
+quests.push(new Quest(3, 'Can İksirini Bul', 'Ormanda can iksirini topla.'));
+
+// Diyalog kuyruğu
+let dialogueQueue = [];
+let isDialogueActive = false;
+
+function enqueueDialogue(text) {
+  dialogueQueue.push(text);
+  if (!isDialogueActive) {
+    showNextDialogue();
+  }
+}
+function showNextDialogue() {
+  if (dialogueQueue.length === 0) {
+    isDialogueActive = false;
+    dialogueBox.style.display = 'none';
+    return;
+  }
+  isDialogueActive = true;
+  const text = dialogueQueue.shift();
+  dialogueBox.innerText = text;
+  dialogueBox.style.display = 'block';
+}
+
+// HUD güncelle
+function updateHUD() {
+  let activeQuests = quests.filter(q => !q.completed);
+  hud.innerHTML = `HP: ${player.hp}/${player.maxHp} | Enerji: ${player.energy}/${player.maxEnergy} | Bölge: ${areas[currentArea].name}`;
+  questListDiv.innerHTML = '<strong>Aktif Görevler:</strong><br>';
+  if (activeQuests.length === 0) questListDiv.innerHTML += 'Tüm görevler tamamlandı!';
+  else activeQuests.forEach(q => {
+    questListDiv.innerHTML += `- ${q.title}<br>`;
+  });
+}
+
+// Basit oyuncu saldırısı (mesela yakında düşman varsa)
+function playerAttack() {
+  if (player.attackCooldown > 0) return;
+  player.attackCooldown = 30; // cooldown 30 frame
+  let enemies = areas[currentArea].enemies;
+  for (let enemy of enemies) {
+    if (!enemy.dead && Math.abs(player.x - enemy.x) < 50) {
+      enemy.hp -= 20;
+      enqueueDialogue(`Düşmana 20 hasar verdin! Kalan canı: ${enemy.hp}`);
+      if (enemy.hp <= 0) {
+        enemy.dead = true;
+        enqueueDialogue(`${enemy.name} öldü!`);
+        checkQuestCompletion(3); // Örnek: düşman öldürmek görevi
+      }
+      break;
+    }
+  }
+}
+
+// Düşman saldırısı
+function attackPlayer(damage) {
+  if (player.hp <= 0) return;
+  player.hp -= damage;
+  if (player.hp < 0) player.hp = 0;
+  enqueueDialogue(`Düşman sana ${damage} hasar verdi!`);
+  if (player.hp === 0) {
+    enqueueDialogue('Öldün! Oyunu yeniden başlat.');
+    resetGame();
+  }
+}
+
+// Görev tamamlama kontrolü
+function checkQuestCompletion(id) {
+  let quest = quests.find(q => q.id === id);
+  if (quest && !quest.completed) {
+    quest.completed = true;
+    enqueueDialogue(`Görev tamamlandı: ${quest.title}`);
+    updateHUD();
+  }
+}
+
+// Oyun sıfırlama
+function resetGame() {
+  player.hp = player.maxHp;
+  player.energy = player.maxEnergy;
+  player.x = 100;
+  currentArea = 1;
+  quests.forEach(q => q.completed = false);
+  areas[1].enemies.forEach(e => e.dead = false);
+  areas[2].enemies.forEach(e => e.dead = false);
+  updateHUD();
+}
+
+// Eşya toplama
+function checkItemCollection() {
+  let items = areas[currentArea].items;
+  for (let item of items) {
+    if (!item.collected && isColliding(player, item)) {
+      item.collected = true;
+      player.inventory.push(item);
+      enqueueDialogue(`Eşya toplandı: ${item.name}`);
+      if (item.type === 'potion') {
+        player.hp += item.effect.hp || 0;
+        if (player.hp > player.maxHp) player.hp = player.maxHp;
+        enqueueDialogue(`${item.name} ile can yenilendi!`);
+      }
+      checkQuestCompletion(3); // Örnek görev, iyileştirici iksir toplama
+    }
+  }
+}
+
+function isColliding(a, b) {
+  return !(a.x > b.x + b.width || 
+           a.x + a.width < b.x || 
+           a.y > b.y + b.height || 
+           a.y + a.height < b.y);
+}
+
+// Oyun döngüsü
+function gameLoop() {
+  // Hareket
+  if (moveLeft && player.x > 0) {
+    player.x -= player.speed;
+    player.facing = 'left';
+  }
+  if (moveRight && player.x < canvas.width - player.width) {
+    player.x += player.speed;
+    player.facing = 'right';
+  }
+  if (player.attackCooldown > 0) player.attackCooldown--;
+
+  // Arka plan
+  if (areas[currentArea].bg) {
+    ctx.drawImage(areas[currentArea].bg, 0, 0, canvas.width, canvas.height);
+  } else {
+    ctx.fillStyle = '#222';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // NPC çizimi
+  for (let npc of areas[currentArea].npcs) {
+    npc.draw();
+  }
+
+  // Düşman güncelle ve çiz
+  for (let enemy of areas[currentArea].enemies) {
+    enemy.update();
+    enemy.draw();
+  }
+
+  // Eşya çizimi
+  for (let item of areas[currentArea].items) {
+    item.draw();
+  }
+
+  // Oyuncu çizimi
+  ctx.drawImage(images.player, player.x, player.y, player.width, player.height);
+
+  // Eşya toplama kontrolü
+  checkItemCollection();
+
+  updateHUD();
+
+  requestAnimationFrame(gameLoop);
+}
+
+// Konuşma fonksiyonu
+function talk() {
+  if (isDialogueActive) return; // Diyalog aktifken engelle
+
+  let nearNpc = areas[currentArea].npcs.find(npc => Math.abs(player.x - npc.x) < 60);
+  if (nearNpc) {
+    nearNpc.talk();
+  } else {
+    enqueueDialogue("Yakında konuşacak kimse yok.");
+  }
+}
+
+// Etkileşim fonksiyonu
+function interact() {
+  enqueueDialogue("Etrafı inceledin ama şu anda kullanılabilir bir şey yok.");
+}
+
+// Envanter göster/gizle (çok basit)
+let inventoryVisible = false;
+function toggleInventory() {
+  if (inventoryVisible) {
+    enqueueDialogue("Envanter kapatıldı.");
+  } else {
+    if (player.inventory.length === 0) {
+      enqueueDialogue("Envanter boş.");
+    } else {
+      enqueueDialogue("Envanter:\n" + player.inventory.map(i => `- ${i.name}`).join('\n'));
+    }
+  }
+  inventoryVisible = !inventoryVisible;
+}
+
+// Tuşlar için eventler
+leftBtn.addEventListener('mousedown', () => moveLeft = true);
+leftBtn.addEventListener('mouseup', () => moveLeft = false);
+leftBtn.addEventListener('touchstart', () => moveLeft = true);
+leftBtn.addEventListener('touchend', () => moveLeft = false);
+
+rightBtn.addEventListener('mousedown', () => moveRight = true);
+rightBtn.addEventListener('mouseup', () => moveRight = false);
+rightBtn.addEventListener('touchstart', () => moveRight = true);
+rightBtn.addEventListener('touchend', () => moveRight = false);
+
+talkBtn.addEventListener('click', talk);
+interactBtn.addEventListener('click', interact);
+inventoryBtn.addEventListener('click', toggleInventory);
+
+// Klavye kontrolleri
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') moveLeft = true;
+  else if (e.key === 'ArrowRight') moveRight = true;
+  else if (e.key === ' ') talk();
+  else if (e.key ===
+    'Enter') interact();
+  else if (e.key === 'i' || e.key === 'I') toggleInventory();
+});
+document.addEventListener('keyup', e => {
+  if (e.key === 'ArrowLeft') moveLeft = false;
+  else if (e.key === 'ArrowRight') moveRight = false;
+});
+
+// Oyun başlangıcı
+resetGame();
+gameLoop();
+</script>
+
+</body>
+</html>
